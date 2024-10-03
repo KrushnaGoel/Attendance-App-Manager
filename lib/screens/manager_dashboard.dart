@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manager/main.dart'; 
 
 class ManagerDashboard extends StatefulWidget {
   @override
@@ -26,7 +27,7 @@ class _ManagerDashboardState extends State<ManagerDashboard> {
     User? user = _auth.currentUser;
     if (user == null) {
       // User is not logged in
-      Navigator.pushReplacementNamed(context, '/login');
+      Navigator.pushReplacementNamed(context, MyApp.loginRoute);
       return;
     }
 
@@ -41,7 +42,7 @@ class _ManagerDashboardState extends State<ManagerDashboard> {
         await _fetchEmployees();
       } else {
         // Manager document does not exist
-        Navigator.pushReplacementNamed(context, '/managerProfileSetup');
+        Navigator.pushReplacementNamed(context, MyApp.managerProfileSetupRoute);
       }
     } catch (e) {
       print('Error fetching manager data: $e');
@@ -158,7 +159,7 @@ class _ManagerDashboardState extends State<ManagerDashboard> {
 
   Future<void> _removeEmployee(String employeeEmail) async {
     try {
-      // Delete the employee document
+      // Delete the employee document from the 'employees' collection
       await _firestore.collection('employees').doc(employeeEmail).delete();
 
       // Refresh the employee list
@@ -201,7 +202,7 @@ class _ManagerDashboardState extends State<ManagerDashboard> {
 
   Future<void> _logout() async {
     await _auth.signOut();
-    Navigator.pushReplacementNamed(context, '/login');
+    Navigator.pushReplacementNamed(context, MyApp.loginRoute);
   }
 
   Widget _buildEmployeeList() {
@@ -237,9 +238,15 @@ class _ManagerDashboardState extends State<ManagerDashboard> {
         title: Text('Welcome, $managerName'),
         actions: [
           IconButton(
-            icon: Icon(Icons.logout),
-            onPressed: _logout,
-            tooltip: 'Logout',
+            icon: Icon(Icons.person),
+            tooltip: 'Edit Profile',
+            onPressed: () {
+              // Navigate to EditManagerProfilePage using named route
+              Navigator.pushNamed(context, MyApp.editManagerProfileRoute).then((_) {
+                // Refresh manager data in case of changes
+                _fetchManagerData();
+              });
+            },
           ),
         ],
       ),

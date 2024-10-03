@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:location/location.dart';
+import 'package:manager/main.dart';
 
 class ManagerProfileSetupPage extends StatefulWidget {
   @override
@@ -13,11 +14,19 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final TextEditingController _nameController = TextEditingController();
-  LocationData? _locationData;
-
+  final TextEditingController _proximityController = TextEditingController();
   bool _isLoading = false;
 
-  Future<void> _getCurrentLocation() async {
+  Map<String, dynamic>? officeLocation;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _proximityController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setOfficeLocation() async {
     Location location = Location();
 
     bool _serviceEnabled;
@@ -28,7 +37,6 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
     if (!_serviceEnabled) {
       _serviceEnabled = await location.requestService();
       if (!_serviceEnabled) {
-        // Cannot get location
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Location services are disabled.')),
         );
@@ -41,7 +49,6 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
     if (_permissionGranted == PermissionStatus.denied) {
       _permissionGranted = await location.requestPermission();
       if (_permissionGranted != PermissionStatus.granted) {
-        // Permissions not granted
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Location permissions are denied.')),
         );
@@ -51,8 +58,18 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
 
     // Get location data
     try {
-      _locationData = await location.getLocation();
-      setState(() {});
+      LocationData? currentLocation = await location.getLocation();
+      if (currentLocation != null) {
+        setState(() {
+          officeLocation = {
+            'latitude': currentLocation.latitude,
+            'longitude': currentLocation.longitude,
+          };
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Office location set successfully.')),
+        );
+      }
     } catch (e) {
       print('Error getting location: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -62,9 +79,20 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
   }
 
   Future<void> _submitProfile() async {
-    if (_nameController.text.isEmpty || _locationData == null) {
+    String name = _nameController.text.trim();
+    String proximityStr = _proximityController.text.trim();
+
+    if (name.isEmpty || officeLocation == null || proximityStr.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Please provide all the required information')),
+      );
+      return;
+    }
+
+    double? proximity = double.tryParse(proximityStr);
+    if (proximity == null || proximity <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please enter a valid proximity value')),
       );
       return;
     }
@@ -77,7 +105,7 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
       User? user = _auth.currentUser;
       if (user == null) {
         // User is not logged in
-        Navigator.pushReplacementNamed(context, '/login');
+        Navigator.pushReplacementNamed(context, MyApp.loginRoute);
         return;
       }
 
@@ -85,17 +113,15 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
 
       // Update the manager's document in Firestore
       await _firestore.collection('managers').doc(email).set({
-        'name': _nameController.text.trim(),
+        'name': name,
         'email': email,
-        'officeLocation': {
-          'latitude': _locationData!.latitude,
-          'longitude': _locationData!.longitude,
-        },
-        // You can add other fields as needed
+        'officeLocation': officeLocation,
+        'proximity': proximity, // Add proximity field
+        // Add other fields as needed
       }, SetOptions(merge: true));
 
       // Navigate to the manager dashboard
-      Navigator.pushReplacementNamed(context, '/managerDashboard');
+      Navigator.pushReplacementNamed(context, MyApp.managerDashboardRoute);
     } on FirebaseException catch (e) {
       print('FirebaseException: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -113,10 +139,53 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
     }
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
+  Widget _buildProfileSetupForm() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 60,
+            child: Icon(Icons.person, size: 60),
+          ),
+          SizedBox(height: 16),
+          TextField(
+            controller: _nameController,
+            decoration: InputDecoration(
+              labelText: 'Your Name',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _setOfficeLocation,
+            child: Text('Set Office Location'),
+          ),
+          SizedBox(height: 8),
+          if (officeLocation != null)
+            Text(
+              'Location set: (${officeLocation!['latitude']}, ${officeLocation!['longitude']})',
+              style: TextStyle(fontSize: 16),
+            ),
+          SizedBox(height: 16),
+          TextField(
+            controller: _proximityController,
+            decoration: InputDecoration(
+              labelText: 'Proximity (in meters)',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+          ),
+          SizedBox(height: 24),
+          _isLoading
+              ? CircularProgressIndicator()
+              : ElevatedButton(
+                  onPressed: _submitProfile,
+                  child: Text('Submit Profile'),
+                ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -127,38 +196,7 @@ class _ManagerProfileSetupPageState extends State<ManagerProfileSetupPage> {
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            CircleAvatar(
-              radius: 60,
-              child: Icon(Icons.person, size: 60),
-            ),
-            SizedBox(height: 16),
-            TextField(
-              controller: _nameController,
-              decoration: InputDecoration(
-                labelText: 'Your Name',
-              ),
-            ),
-            SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _getCurrentLocation,
-              child: Text('Set Office Location'),
-            ),
-            SizedBox(height: 16),
-            if (_locationData != null)
-              Text(
-                'Location set: (${_locationData!.latitude}, ${_locationData!.longitude})',
-              ),
-            SizedBox(height: 24),
-            _isLoading
-                ? CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _submitProfile,
-                    child: Text('Submit Profile'),
-                  ),
-          ],
-        ),
+        child: _buildProfileSetupForm(),
       ),
     );
   }
