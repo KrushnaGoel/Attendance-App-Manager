@@ -17,7 +17,9 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
   try {
     // Start the sign-in process
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-
+    final GoogleSignIn googleSignIn = GoogleSignIn();
+    await FirebaseAuth.instance.signOut();
+    await googleSignIn.signOut();
     if (googleUser == null) {
       // User canceled the sign-in
       return;

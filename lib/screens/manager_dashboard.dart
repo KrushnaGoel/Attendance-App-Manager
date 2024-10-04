@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manager/screens/edit_employee_detail.dart';
+import 'package:manager/screens/edit_manager_profile.dart';
 import 'package:manager/main.dart'; 
 
 class ManagerDashboard extends StatefulWidget {
@@ -9,257 +12,253 @@ class ManagerDashboard extends StatefulWidget {
 }
 
 class _ManagerDashboardState extends State<ManagerDashboard> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
+  final User? user = FirebaseAuth.instance.currentUser;
   late String managerEmail;
-  late String managerName;
-  bool _isLoading = true;
-  List<DocumentSnapshot> _employees = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchManagerData();
+    managerEmail = user?.email?.toLowerCase() ?? '';
   }
 
-  Future<void> _fetchManagerData() async {
-    User? user = _auth.currentUser;
-    if (user == null) {
-      // User is not logged in
-      Navigator.pushReplacementNamed(context, MyApp.loginRoute);
-      return;
-    }
-
-    managerEmail = user.email!.toLowerCase();
-
-    try {
-      DocumentSnapshot managerDoc =
-          await _firestore.collection('managers').doc(managerEmail).get();
-
-      if (managerDoc.exists) {
-        managerName = managerDoc['name'] ?? 'Manager';
-        await _fetchEmployees();
-      } else {
-        // Manager document does not exist
-        Navigator.pushReplacementNamed(context, MyApp.managerProfileSetupRoute);
-      }
-    } catch (e) {
-      print('Error fetching manager data: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error fetching manager data: ${e.toString()}')),
-      );
-    }
-  }
-
-  Future<void> _fetchEmployees() async {
-    try {
-      QuerySnapshot employeeSnapshot = await _firestore
-          .collection('employees')
-          .where('managerEmail', isEqualTo: managerEmail)
-          .get();
-
-      setState(() {
-        _employees = employeeSnapshot.docs;
-        _isLoading = false;
-      });
-    } catch (e) {
-      print('Error fetching employees: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error fetching employees: ${e.toString()}')),
-      );
-    }
-  }
-
-  Future<void> _addEmployee() async {
-    TextEditingController _emailController = TextEditingController();
-    TextEditingController _nameController = TextEditingController();
-
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add Employee'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _emailController,
-              decoration: InputDecoration(
-                labelText: 'Employee Email',
-              ),
-            ),
-            TextField(
-              controller: _nameController,
-              decoration: InputDecoration(
-                labelText: 'Employee Name',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              String employeeEmail = _emailController.text.trim().toLowerCase();
-              String employeeName = _nameController.text.trim();
-
-              if (employeeEmail.isEmpty || employeeName.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Please provide all the required information')),
-                );
-                return;
-              }
-
-              Navigator.of(context).pop();
-
-              try {
-                // Check if the employee already exists
-                DocumentSnapshot employeeDoc = await _firestore
-                    .collection('employees')
-                    .doc(employeeEmail)
-                    .get();
-
-                if (employeeDoc.exists) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Employee already exists')),
-                  );
-                  return;
-                }
-
-                // Create the employee document
-                await _firestore.collection('employees').doc(employeeEmail).set({
-                  'email': employeeEmail,
-                  'name': employeeName,
-                  'managerEmail': managerEmail,
-                  // Add other fields as needed
-                });
-
-                // Refresh the employee list
-                await _fetchEmployees();
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Employee added successfully')),
-                );
-              } catch (e) {
-                print('Error adding employee: $e');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error adding employee: ${e.toString()}')),
-                );
-              }
-            },
-            child: Text('Add'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel'),
-          ),
-        ],
-      ),
+  Future<void> _signOut(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      MyApp.loginRoute,
+      (route) => false,
     );
   }
 
-  Future<void> _removeEmployee(String employeeEmail) async {
-    try {
-      // Delete the employee document from the 'employees' collection
-      await _firestore.collection('employees').doc(employeeEmail).delete();
-
-      // Refresh the employee list
-      await _fetchEmployees();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Employee removed successfully')),
-      );
-    } catch (e) {
-      print('Error removing employee: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error removing employee: ${e.toString()}')),
-      );
-    }
-  }
-
-  Future<void> _confirmRemoveEmployee(String employeeEmail, String employeeName) async {
-    bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove Employee'),
-        content: Text('Are you sure you want to remove $employeeName?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await _removeEmployee(employeeEmail);
-    }
-  }
-
-  Future<void> _logout() async {
-    await _auth.signOut();
-    Navigator.pushReplacementNamed(context, MyApp.loginRoute);
-  }
-
-  Widget _buildEmployeeList() {
-    if (_employees.isEmpty) {
-      return Center(child: Text('No employees added yet.'));
-    }
-
-    return ListView.builder(
-      itemCount: _employees.length,
-      itemBuilder: (context, index) {
-        DocumentSnapshot employeeDoc = _employees[index];
-        String employeeName = employeeDoc['name'] ?? 'Employee';
-        String employeeEmail = employeeDoc['email'] ?? '';
-
-        return ListTile(
-          title: Text(employeeName),
-          subtitle: Text(employeeEmail),
-          trailing: IconButton(
-            icon: Icon(Icons.delete),
-            onPressed: () => _confirmRemoveEmployee(employeeEmail, employeeName),
-            tooltip: 'Remove Employee',
-          ),
-          // Add more details or actions as needed
-        );
-      },
-    );
+  Stream<QuerySnapshot> _getEmployeesStream() {
+    return FirebaseFirestore.instance
+        .collection('employees')
+        .where('managerEmail', isEqualTo: managerEmail)
+        .snapshots();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Welcome, $managerName'),
+        title: Text('Manager Dashboard'),
         actions: [
           IconButton(
             icon: Icon(Icons.person),
             tooltip: 'Edit Profile',
-            onPressed: () {
-              // Navigate to EditManagerProfilePage using named route
-              Navigator.pushNamed(context, MyApp.editManagerProfileRoute).then((_) {
-                // Refresh manager data in case of changes
-                _fetchManagerData();
-              });
-            },
+            onPressed: () => Navigator.pushNamed(context, MyApp.editManagerProfileRoute),
           ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _fetchEmployees,
-              child: _buildEmployeeList(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _getEmployeesStream(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Error fetching employees.'));
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
+          final employees = snapshot.data?.docs ?? [];
+          if (employees.isEmpty) {
+            return Center(child: Text('No employees found.'));
+          }
+          return ListView.builder(
+            itemCount: employees.length,
+            itemBuilder: (context, index) {
+              DocumentSnapshot employeeDoc = employees[index];
+              String employeeEmail = employeeDoc.id;
+              String employeeName = employeeDoc['name'] ?? 'Unnamed';
+
+              return EmployeeCard(
+                employeeEmail: employeeEmail,
+                employeeName: employeeName,
+                managerEmail: managerEmail,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class EmployeeCard extends StatefulWidget {
+  final String employeeEmail;
+  final String employeeName;
+  final String managerEmail;
+
+  const EmployeeCard({
+    required this.employeeEmail,
+    required this.employeeName,
+    required this.managerEmail,
+  });
+
+  @override
+  _EmployeeCardState createState() => _EmployeeCardState();
+}
+
+class _EmployeeCardState extends State<EmployeeCard> {
+  Duration _timeInOffice = Duration(seconds: 0);
+  bool _isInOffice = false;
+  Timer? _updateTimer; // Timer to refresh the UI every second when employee is in the office
+
+  @override
+  void initState() {
+    super.initState();
+    _listenToAttendanceUpdates();
+  }
+
+  void _listenToAttendanceUpdates() {
+    String date = DateTime.now().toString().split(' ')[0]; // Get YYYY-MM-DD
+    String documentId = '${widget.employeeEmail}_$date';
+
+    FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(documentId)
+        .snapshots()
+        .listen((attendanceDoc) {
+      if (attendanceDoc.exists) {
+        Map<String, dynamic> data = attendanceDoc.data() as Map<String, dynamic>;
+        List<dynamic> inOutTimes = data['inOutTimes'] ?? [];
+        double totalWorkDuration = (data['totalWorkDuration'] as num?)?.toDouble() ?? 0.0;
+
+        bool isInOffice = false;
+        Duration currentSessionDuration = Duration.zero;
+
+        if (inOutTimes.isNotEmpty) {
+          var lastEntry = inOutTimes.last;
+          if (lastEntry['outTime'] == null) {
+            isInOffice = true;
+            Timestamp inTimestamp = lastEntry['inTime'];
+            DateTime inTime = inTimestamp.toDate();
+            DateTime now = DateTime.now();
+            currentSessionDuration = now.difference(inTime);
+          }
+        }
+
+        Duration totalTime = Duration(
+                milliseconds: (totalWorkDuration * 3600 * 1000).toInt()) +
+            currentSessionDuration;
+
+        setState(() {
+          _isInOffice = isInOffice;
+          _timeInOffice = totalTime;
+        });
+
+        if (isInOffice) {
+          _startUpdateTimer();
+        } else {
+          _stopUpdateTimer();
+        }
+      } else {
+        // No attendance record for today
+        setState(() {
+          _isInOffice = false;
+          _timeInOffice = Duration(seconds: 0);
+        });
+        _stopUpdateTimer();
+      }
+    });
+  }
+
+  void _startUpdateTimer() {
+    _updateTimer?.cancel(); // Cancel any existing timer
+    _updateTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      // Trigger a rebuild every second to update the timer display
+      setState(() {
+        // Recalculate the time in office to reflect the ongoing session
+        _timeInOffice = _timeInOffice + Duration(seconds: 1);
+      });
+    });
+  }
+
+  void _stopUpdateTimer() {
+    _updateTimer?.cancel();
+    _updateTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    String hours = twoDigits(duration.inHours.remainder(24));
+    String minutes = twoDigits(duration.inMinutes.remainder(60));
+    String seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$hours:$minutes:$seconds';
+  }
+
+  void _editEmployee() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditEmployeePage(
+          employeeEmail: widget.employeeEmail,
+          employeeName: widget.employeeName,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _removeEmployee() async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Employee'),
+        content: Text('Are you sure you want to remove this employee?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false), // Cancel
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true), // Confirm
+            child: Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirm) {
+      await FirebaseFirestore.instance
+          .collection('employees')
+          .doc(widget.employeeEmail)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Employee removed successfully.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: _isInOffice ? Colors.green[50] : Colors.red[50],
+      child: ListTile(
+        title: Text(
+          widget.employeeName,
+          style: TextStyle(fontSize: 18),
+        ),
+        subtitle: Text(
+          'Time in Office: ${_formatDuration(_timeInOffice)}',
+          style: TextStyle(fontSize: 16),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: _editEmployee,
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addEmployee,
-        child: Icon(Icons.person_add),
-        tooltip: 'Add Employee',
+            IconButton(
+              icon: Icon(Icons.delete),
+              onPressed: _removeEmployee,
+            ),
+          ],
+        ),
       ),
     );
   }
